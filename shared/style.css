@@ -1,0 +1,69 @@
+/* Shared look for every mission. Teammates: use these classes so the game feels like one app. */
+:root {
+  --bg: #0b0f17; --panel: #121826; --panel-2: #182033; --line: #26314a; --line-2: #34415f;
+  --text: #e8ecf4; --muted: #9aa6bd; --faint: #6c7893;
+  --accent: #6ea8ff; --accent-bg: #16284a; --good: #46c28a; --good-bg: #123526;
+  --warn: #f2b84b; --warn-bg: #3a2d12; --bad: #ff6b6b; --bad-bg: #3d1717; --ice: #7fdcff;
+  --radius: 10px; --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 var(--font); }
+a { color: var(--accent); }
+button { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); color: #06101f; border-color: var(--accent); font-weight: 600; }
+button:focus-visible, .opt:focus-within, .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { margin: 0 0 .5rem; font-weight: 600; line-height: 1.25; }
+h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; } h3 { font-size: 1rem; }
+p { margin: 0 0 .75rem; }
+.muted { color: var(--muted); } .small { font-size: 13px; } .mono { font-family: var(--mono); }
+
+.topbar { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+.topbar .brand { font-weight: 700; letter-spacing: .02em; }
+.topbar a.back { color: var(--muted); text-decoration: none; font-size: 14px; }
+.stages { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.stage { padding: 4px 10px; border-radius: 999px; font-size: 13px; background: var(--panel-2); color: var(--faint); border: 1px solid var(--line); }
+.stage.done { color: var(--muted); } .stage.now { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; padding: 20px; max-width: 1280px; margin: 0 auto; }
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); padding: 16px; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+
+.card { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; cursor: pointer; text-align: left; }
+.card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.tag { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--line); color: var(--muted); }
+.tag.good { background: var(--good-bg); color: var(--good); } .tag.warn { background: var(--warn-bg); color: var(--warn); }
+.tag.bad { background: var(--bad-bg); color: var(--bad); } .tag.accent { background: var(--accent-bg); color: var(--accent); }
+
+.meter { margin-bottom: 10px; }
+.meter .lbl { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+.meter .lbl b { color: var(--text); font-weight: 600; }
+.bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 4px; }
+.bar > i { display: block; height: 100%; background: var(--good); border-radius: 4px; }
+.bar > i.warn { background: var(--warn); } .bar > i.bad { background: var(--bad); }
+
+.capcom { border-color: #2d4f8a; background: #0f1a30; }
+.capcom h3 { color: var(--accent); display: flex; align-items: center; gap: 8px; }
+.capcom ul { margin: 0; padding-left: 18px; } .capcom li { margin-bottom: 6px; }
+
+.check { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.log { max-height: 220px; overflow: auto; font-size: 13px; }
+.log div { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.log .bad { color: #ffb3b3; } .log .good { color: #a6f0c9; }
+
+.mapwrap { position: relative; width: 100%; max-width: 640px; margin: 0 auto; }
+.mapwrap canvas { width: 100%; height: auto; display: block; border-radius: 8px; border: 1px solid var(--line); cursor: crosshair; image-rendering: pixelated; }
+.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5, 8, 14, .78); border-radius: 8px; padding: 16px; }
+.overlay .panel { max-width: 460px; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+.opt { display: flex; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; background: var(--panel-2); }
+.opt input { margin-top: 4px; accent-color: var(--accent); }
+.opt.on { border-color: var(--accent); }
+.opt .nums { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+.score { font-size: 3rem; font-weight: 700; line-height: 1; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

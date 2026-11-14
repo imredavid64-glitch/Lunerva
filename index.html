@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control | Space Mission Design Game</title>
+  <meta name="description" content="Design, test and fly three linked space missions: Earth-space link, lunar excavation rover, and orbits and satellites.">
+  <link rel="stylesheet" href="shared/style.css">
+</head>
+<body>
+  <header class="topbar"><span class="brand">Mission Control</span><span class="muted small">NASA Space Apps 2026 · Space Mission Design Game</span></header>
+  <main style="max-width:1100px;margin:0 auto;padding:20px" class="stack">
+    <section class="panel">
+      <h1>Three missions, one goal: a working Moon base</h1>
+      <p>Each mission is designed by a different engineer. They depend on each other: the rover needs the relay satellite to talk to Earth, and the satellite needs the ground link.
+      In every mission you <b>choose an objective, pick parts, test, deploy and survive</b>, then learn why it worked or failed.</p>
+    </section>
+    <section class="grid" id="missions"></section>
+    <section class="panel"><h2>Team score</h2><div id="team"></div></section>
+  </main>
+  <script type="module">
+    import { loadResults } from './shared/results.js';
+    const MISSIONS = [
+      { id: 'comms', n: 1, title: 'Earth-space link', text: 'Build the ground stations and antennas that carry data between Earth and the Moon.', href: 'missions/comms/index.html', ready: false },
+      { id: 'rover', n: 2, title: 'Excavation and rover', text: 'Design a rover, land on the real Shackleton crater rim and dig for ice before the lunar night.', href: 'missions/rover/index.html', ready: true },
+      { id: 'orbit', n: 3, title: 'Orbits and satellites', text: 'Calculate the orbit for a relay satellite that keeps the south pole in contact with Earth.', href: 'missions/orbit/index.html', ready: false },
+    ];
+    const res = loadResults();
+    document.getElementById('missions').innerHTML = MISSIONS.map((m) => {
+      const r = res[m.id];
+      return `<article class="card" style="cursor:default"><span class="tag ${m.ready ? 'accent' : ''}">Mission ${m.n}</span>
+        <h2 style="margin-top:8px">${m.title}</h2><p class="small">${m.text}</p>
+        ${r ? `<p class="small"><span class="tag ${r.grade === 'Mission success' ? 'good' : 'warn'}">${r.grade}</span> Best ${r.best}/100</p>` : ''}
+        ${m.ready ? `<a href="${m.href}"><button class="primary">Start mission</button></a>` : '<button disabled>In development</button>'}</article>`;
+    }).join('');
+    const scores = MISSIONS.map((m) => res[m.id]?.best || 0);
+    document.getElementById('team').innerHTML = `<p><b>${scores.reduce((a, b) => a + b, 0)}</b> / 300 points</p>
+      <p class="small muted">Scores are saved in this browser only.</p>`;
+  </script>
+</body>
+</html>

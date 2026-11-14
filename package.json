@@ -1,0 +1,12 @@
+{
+  "name": "space-mission-game",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "NASA Space Apps 2026: Space Mission Design Game. No build step; open with any static server.",
+  "scripts": {
+    "start": "npx --yes serve -l 5173 .",
+    "test": "node --test tests/*.test.mjs",
+    "terrain": "python scripts/build_terrain.py"
+  }
+}
