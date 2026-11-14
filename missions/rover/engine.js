@@ -19,6 +19,8 @@ export function newRun({ design, objectiveId, siteK, testsRun = 0, seed = 2026 }
     decisions: { total: 0, withLink: 0 },
     stats: { driveKm: 0, digH: 0, brownouts: 0 },
     log: [], rand: rng(seed), lastEvent: null,
+    tele: [{ t: 0, b: 1, shadow: false }], // battery history for the debrief chart
+    track: [],                               // last drive, step by step, for the animation
     ended: false, endReason: '',
     get here() { return cells[this.k]; },
   };
@@ -49,6 +51,7 @@ export function wait(s, hours, extraW = 0) {
     s.batteryWh = Math.min(s.rover.batteryWh, s.batteryWh + (gen - load) * dt);
     s.shadowH = sun <= 0.1 && heaterW(s, sun) === 0 && !s.rover.warm ? s.shadowH + dt : 0;
     s.t += dt; left -= dt;
+    s.tele.push({ t: s.t, b: Math.max(0, s.batteryWh / s.rover.batteryWh), shadow: sun <= 0.1 });
     if (s.shadowH > shadowLimit(s)) return end(s, 'froze', 'The rover froze in the shadow. Its electronics cracked at about -200 °C.');
     if (s.batteryWh <= 0) {
       if (sun > 0.2 || s.rover.rtgW) {
@@ -80,6 +83,7 @@ export function planDrive(s, target) { return findPath(cells[s.k], target, s.rov
 /** Drive along a planned path. Returns an event (or null) for the screen to show. */
 export function drive(s, plan) {
   let hours = 0, steep = false, i = 1;
+  s.track = [{ k: s.k, t: s.t, b: s.batteryWh / s.rover.batteryWh }];
   for (; i < plan.path.length && !s.ended; i++) {
     if (s.batteryWh < 0.12 * s.rover.batteryWh) {
       say(s, 'Fault protection stopped the drive: battery under 12%. Recharge before you go on.', 'bad');
@@ -94,6 +98,7 @@ export function drive(s, plan) {
     s.k = b.k;
     wait(s, h, st.watts * (s.damage.drive || 1));
     hours += h; s.stats.driveKm += km;
+    s.track.push({ k: b.k, t: s.t, b: Math.max(0, s.batteryWh / s.rover.batteryWh) });
     if (b.kind === 'floor') s.floorSample = true;
   }
   say(s, `Drove ${i - 1} cells in ${hours.toFixed(1)} h.`);

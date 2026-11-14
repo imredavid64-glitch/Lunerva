@@ -88,17 +88,21 @@ export function draw(canvas, opts) {
       ctx.fillStyle = `rgba(127,220,255,${a})`; ctx.fillRect(c.i * CELL + 1, c.j * CELL + 1, CELL - 2, CELL - 2);
     }
   }
-  if (opts.plan) {
-    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 4; ctx.setLineDash([10, 8]); ctx.beginPath();
-    opts.plan.path.forEach((c, n) => { const [x, y] = center(c); n ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  const route = (plan, color, width, dash) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash); ctx.beginPath();
+    plan.path.forEach((c, n) => { const [x, y] = center(c); n ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke(); ctx.setLineDash([]);
-  }
+  };
+  if (opts.hoverPlan && opts.hoverPlan !== opts.plan) route(opts.hoverPlan, opts.hoverPlan.tooFar ? 'rgba(255,107,107,.8)' : 'rgba(255,255,255,.55)', 3, [6, 8]);
+  if (opts.plan) route(opts.plan, '#ffd166', 5, [12, 8]);
   if (opts.hover) {
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
     ctx.strokeRect(opts.hover.i * CELL, opts.hover.j * CELL, CELL, CELL);
   }
-  const onLander = run && run.k === opts.siteK;
-  if (opts.siteK != null) marker(ctx, cells[opts.siteK], '#c9d1e0', onLander ? '' : 'Lander');
-  if (run) marker(ctx, cells[run.k], '#ffd166', 'Rover');
-  scaleBar(ctx);
+  if (opts.markers !== false) {
+    const onLander = run && run.k === opts.siteK;
+    if (opts.siteK != null) marker(ctx, cells[opts.siteK], '#c9d1e0', onLander ? '' : 'Lander');
+    if (run) marker(ctx, cells[run.k], '#ffd166', 'Rover');
+  }
+  if (opts.scale !== false) scaleBar(ctx);
 }

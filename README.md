@@ -36,6 +36,8 @@ Land a rover on the rim of Shackleton crater at the lunar south pole and dig for
 - **Real terrain.** A 48 × 48 grid (about 333 m per cell) built from NASA LRO LOLA slope and elevation products, Site04 "Shackleton Rim". Shackleton's walls are steeper than 20°, so wheels alone can't reach the icy floor. Players need a tether or a walker.
 - **Seven design slots**: mobility, power, excavator, thermal, comms, ice finder, special kit. Lander capacity is 450 kg and the budget $400M, so no rover can take every best part.
 - **Survival**: battery, about -200 °C shadows, fault protection, and random events (stuck wheel, dust, solar flare, heater fault, buried rock). With no link to Earth, the rover picks the default action.
+- **3D Moon (three.js)**: the real elevation becomes a 3D terrain with the game map draped over it. A low polar Sun circles the horizon and casts long shadows, Earth hangs low in the sky, and the rover (built from the parts you chose) drives, digs and scans with dust and pulse effects. Includes a powered-descent landing. A 2D map is always one click away, and is used automatically if three.js can't load.
+- **Controls**: hover the ground to preview a route with its time and energy cost; click to plan and click again to drive. `W A S D` / arrow keys drive one square, `Space` digs, `F` scans, `R` rests, `Enter` drives the plan, `Esc` clears it. Sound effects can be muted.
 - **Tests** (`tests/`): a robot player wins all three objectives with a sensible design, and a blankets-only rover freezes in the crater.
 
 ### Files
@@ -47,7 +49,9 @@ Land a rover on the rim of Shackleton crater at the lunar south pole and dig for
 | `missions/rover/engine.js` | Game rules and scoring (no screen code) |
 | `missions/rover/events.js` | Random events |
 | `missions/rover/capcom.js` | Test checks and CAPCOM hints |
-| `missions/rover/game.js`, `deploy.js`, `map.js` | Screens |
+| `missions/rover/game.js`, `deploy.js`, `debrief.js`, `map.js` | Screens |
+| `missions/rover/scene3d.js`, `rover-model.js` | three.js terrain, rover, lander and effects |
+| `shared/fx.js`, `shared/game.css` | Sounds, toasts, game styling |
 | `scripts/build_terrain.py` | Rebuilds `data/terrain.js` and the map pictures from NASA Moon Trek |
 
 ## For teammates: add your mission
@@ -77,4 +81,4 @@ The team reviewed, tested and edited everything. No AI-generated images or audio
 
 ## Credits
 
-NASA Moon Trek / LRO LOLA data (public domain). No third-party libraries. Fonts in the deck: Space Grotesk and Inter (SIL Open Font License).
+NASA Moon Trek / LRO LOLA data (public domain). [three.js](https://threejs.org) r170 (MIT licence), loaded from the jsDelivr CDN. Sound effects are generated in the browser (Web Audio), no audio files. Fonts in the deck: Space Grotesk and Inter (SIL Open Font License).

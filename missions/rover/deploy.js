@@ -1,146 +1,291 @@
-// Deploy (survive and dig on the Moon) and Debrief screens.
+// Deploy: survive and dig on the Moon, in 3D (three.js) with a 2D fallback.
 import { LIMITS } from './parts.js';
-import { cells, sunAt, SLOPE_TEXT } from './world.js';
+import { cells, cellAt, sunAt, SLOPE_TEXT } from './world.js';
 import * as E from './engine.js';
 import { hint } from './capcom.js';
 import { setupCanvas, draw, cellFromEvent } from './map.js';
-import { S, go, meter, legend } from './game.js';
-import { saveResult } from '../../shared/results.js';
+import { S, go, legend } from './game.js';
+import { finishRun } from './debrief.js';
+import { sfx, toast, isMuted, setMuted } from '../../shared/fx.js';
 
 const $ = (sel) => document.querySelector(sel);
+let ui = null; // { scene, map, busy, hoverK, hoverPlan, keyHandler, logLen }
 
 export function startDeploy() {
   S.run = E.newRun({ design: { ...S.design }, objectiveId: S.objectiveId, siteK: S.siteK, testsRun: S.testsRun, seed: Date.now() % 100000 });
-  S.plan = null; S.event = null; S.eventMsg = null; S.view = 'terrain';
+  S.plan = null; S.event = null; S.eventMsg = null; S.landed = false;
 }
 
-function after(ev) {
-  S.plan = null;
-  if (ev) S.event = ev;
-  if (S.run.ended && !S.event) { finishRun(); return; }
-  renderDeploy();
+export function leaveDeploy() {
+  if (!ui) return;
+  if (ui.scene) ui.scene.dispose();
+  window.removeEventListener('keydown', ui.keyHandler);
+  ui = null;
 }
 
-function finishRun() {
-  S.result = E.debrief(S.run);
-  saveResult('rover', { score: S.result.score, grade: S.result.grade, summary: `${S.run.objective.title}: ${S.result.got.toFixed(1)} ${S.run.objective.unit}` });
-  go('debrief');
+const KIND = { trap: 'Cold trap', floor: 'Crater floor, never lit', wall: 'Crater wall', plain: 'Plain' };
+
+function overlay() {
+  const r = S.run;
+  draw(ui.map, { view: S.view === 'sun' ? 'sun' : S.view === 'slope' ? 'slope' : 'terrain', mode: 'deploy', t: r.t, siteK: r.siteK, run: r,
+    plan: S.plan, hoverPlan: ui.hoverPlan, hover: ui.hoverK != null ? cells[ui.hoverK] : null, markers: !ui.scene || ui.flat });
+  if (ui.scene) ui.scene.refreshOverlay();
 }
 
-function statusPanel(r) {
-  const c = cells[r.k];
-  const sun = sunAt(c, r.t);
-  const link = E.link(r);
-  const o = r.objective;
+function hudHtml(view) {
+  const r = S.run, o = r.objective, c = cells[r.k];
+  const t = view?.t ?? r.t, b = view?.b ?? r.batteryWh / r.rover.batteryWh;
   const got = o.metric === 'water' ? r.cargo.water : r.cargo.regolith;
-  return `<section class="panel"><h3>Rover status</h3>
-    ${meter('Mission time', r.t, LIMITS.missionHours, 'h', { text: `Day ${Math.floor(r.t / 24) + 1} of 14 · ${Math.round(LIMITS.missionHours - r.t)} h left` })}
-    ${meter('Battery', r.batteryWh, r.rover.batteryWh, 'Wh', { lowBad: true, text: `${Math.max(0, Math.round((r.batteryWh / r.rover.batteryWh) * 100))}%` })}
-    ${meter('Objective', got, o.target, o.unit, { text: `${got.toFixed(o.metric === 'water' ? 1 : 0)} / ${o.target} ${o.unit}` })}
-    <p class="small">Sun here: <b>${Math.round(sun * 100)}%</b> · Link to Earth: <b>${link.ok ? (link.dte ? 'direct' : 'relay') : 'none'}</b><br>
-    Ground: ${SLOPE_TEXT[c.slope]}, ${c.kind === 'trap' ? 'cold trap' : c.kind === 'floor' ? 'crater floor (never lit)' : c.kind === 'wall' ? 'crater wall' : 'plain'}<br>
-    Regolith dug: ${Math.round(r.cargo.regolith)} kg · Water: ${r.cargo.water.toFixed(1)} kg
-    ${r.scanned.has(c.k) ? `<br>Ice here (scanned): <b>${c.ice.toFixed(1)}%</b>` : ''}${r.shadowH > 0 ? `<br>Time in shadow without heat: ${r.shadowH.toFixed(1)} h` : ''}</p></section>`;
+  const left = LIMITS.missionHours - t, sun = sunAt(c, t), link = E.link(r);
+  const pct = Math.max(0, Math.round(b * 100));
+  return `<div class="hud-row"><span class="chip ${left < 48 ? 'urgent' : ''}">Day ${Math.min(14, Math.floor(t / 24) + 1)}/14 · ${Math.max(0, Math.round(left))} h to night</span>
+      <span class="chip ${sun > 0.2 ? 'sun' : 'dark'}">${sun > 0.2 ? `Sun ${Math.round(sun * 100)}%` : 'In shadow'}</span>
+      <span class="chip ${link.ok ? 'ok' : 'off'}">${link.ok ? (link.dte ? 'Earth link' : 'Relay link') : 'No link'}</span></div>
+    <div class="gauge"><span>Battery</span><div class="bar"><i class="${pct < 20 ? 'bad' : pct < 40 ? 'warn' : ''}" style="width:${pct}%"></i></div><b>${pct}%</b></div>
+    <div class="gauge"><span>${o.metric === 'water' ? 'Water' : 'Regolith'}</span><div class="bar"><i class="goal" style="width:${Math.min(100, (got / o.target) * 100)}%"></i></div><b>${got.toFixed(o.metric === 'water' ? 1 : 0)}/${o.target}</b></div>
+    ${r.shadowH > 0 ? `<div class="chip dark">Cold: ${r.shadowH.toFixed(1)} h in shadow without heat</div>` : ''}
+    <div class="small muted">${KIND[c.kind]} · ${SLOPE_TEXT[c.slope]}${r.scanned.has(c.k) ? ` · ice ${c.ice.toFixed(1)}%` : ''}</div>`;
 }
 
-function eventOverlay(r) {
+function updateHud(view) {
+  $('#hud').innerHTML = hudHtml(view);
+  if (view) return;
+  const r = S.run, plan = S.plan;
+  $('#plan').innerHTML = plan
+    ? `Route: <b>${plan.path.length - 1}</b> cells · <b>${plan.hours.toFixed(1)} h</b> · <b>${(plan.wh / 1000).toFixed(2)} kWh</b> of ${(r.batteryWh / 1000).toFixed(2)} available ${plan.wh > r.batteryWh ? '<span class="tag bad">not enough battery</span>' : ''}`
+    : 'Click the ground to plan a route, or drive one square with <span class="kbd">W A S D</span>.';
+  $('#a-drive').disabled = !plan || ui.busy;
+  for (const id of ['a-dig2', 'a-dig6', 'a-rest', 'a-end']) $('#' + id).disabled = ui.busy || r.ended;
+  $('#a-scan').disabled = ui.busy || !r.rover.sci.scan;
+  $('#a-dig2').innerHTML = `Dig 2 h <small>${Math.round(E.digRate(r) * 2)} kg</small> <span class="kbd">Space</span>`;
+  $('#side').innerHTML = ui.capcom(hint('deploy', { state: r }));
+  $('#log').innerHTML = r.log.slice(0, 30).map((l) => `<div class="${l.kind}"><span class="mono muted">${l.t} h</span> ${l.text}</div>`).join('');
+  if (ui.scene) { ui.scene.setSunTime(r.t); ui.scene.setDark(sunAt(cells[r.k], r.t) < 0.2); }
+}
+
+function showEvent() {
+  const r = S.run, box = $('#ev');
+  if (!S.event && !S.eventMsg) { box.innerHTML = ''; return; }
   if (S.eventMsg) {
-    return `<div class="overlay"><div class="panel stack"><h2>${S.eventMsg.title}</h2><p>${S.eventMsg.text}</p>
+    box.innerHTML = `<div class="overlay"><div class="panel stack pop"><h2>${S.eventMsg.title}</h2><p>${S.eventMsg.text}</p>
       <div class="row"><button class="primary" id="ev-ok">Continue</button></div></div></div>`;
+    $('#ev-ok').focus(); return;
   }
   const ev = S.event, link = E.link(r).ok;
-  return `<div class="overlay" role="dialog" aria-label="${ev.title}"><div class="panel stack"><span class="tag warn">Surprise</span><h2>${ev.title}</h2><p>${ev.text}</p>
-    ${link ? ev.choices.map((c, n) => {
-      const ok = !c.needs || c.needs(r);
-      return `<button data-choice="${n}" ${ok ? '' : 'disabled'}>${c.label}</button>`;
-    }).join('') : `<p class="small"><span class="tag bad">No link to Earth</span> The rover must act on its own.</p><button class="primary" data-choice="auto">See what the rover does</button>`}
+  box.innerHTML = `<div class="overlay" role="dialog" aria-label="${ev.title}"><div class="panel stack pop alert"><span class="tag warn">Surprise · Day ${Math.floor(r.t / 24) + 1}</span><h2>${ev.title}</h2><p>${ev.text}</p>
+    ${link ? ev.choices.map((c, n) => `<button data-choice="${n}" ${!c.needs || c.needs(r) ? '' : 'disabled'}>${c.label}</button>`).join('')
+      : `<p class="small"><span class="tag bad">No link to Earth</span> The rover must act on its own.</p><button class="primary" data-choice="auto">See what the rover does</button>`}
   </div></div>`;
+  box.querySelector('button:not([disabled])')?.focus();
 }
 
-export function renderDeploy(capcomPanel) {
-  const r = S.run;
-  if (capcomPanel) renderDeploy.capcom = capcomPanel;
-  const cap = renderDeploy.capcom;
-  const c = cells[r.k];
-  const plan = S.plan;
-  const canDig = !r.ended;
-  $('#main').innerHTML = `<section class="panel stack"><div class="row" style="justify-content:space-between"><h1 style="margin:0">On the Moon</h1>
-    <div class="row small">${[['terrain', 'Terrain'], ['slope', 'NASA slope'], ['sun', 'Sunlight']].map(([v, l]) => `<button data-view="${v}" class="${S.view === v ? 'primary' : ''}">${l}</button>`).join('')}</div></div>
-    <div class="mapwrap"><canvas id="map" aria-label="Rover map. Click a cell to plan a drive."></canvas>${S.event || S.eventMsg ? eventOverlay(r) : ''}</div>
-    ${legend()}
-    <div class="panel" style="background:var(--panel-2)">
-      ${plan ? `<p><b>Planned drive:</b> ${plan.path.length - 1} cells, about ${plan.hours.toFixed(1)} h and ${(plan.wh / 1000).toFixed(2)} kWh. You have ${(r.batteryWh / 1000).toFixed(2)} kWh.</p>`
-        : '<p class="small muted">Click the map to plan a drive. The route avoids slopes your rover cannot climb.</p>'}
-      <div class="row">
-        <button class="primary" id="drive" ${plan ? '' : 'disabled'}>Drive</button>
-        <button id="dig2" ${canDig ? '' : 'disabled'}>Dig 2 h (${Math.round(E.digRate(r) * 2)} kg)</button>
-        <button id="dig6" ${canDig ? '' : 'disabled'}>Dig 6 h</button>
-        <button id="scan" ${r.rover.sci.scan ? '' : 'disabled'} title="${r.rover.sci.scan ? 'Reveal buried ice nearby (1 h)' : 'Needs the neutron spectrometer'}">Scan for ice (1 h)</button>
-        <button id="rest">Rest 4 h</button>
-        <button id="end">End mission</button>
-      </div></div>
-    <section><h3>Mission log</h3><div class="log">${r.log.slice(0, 40).map((l) => `<div class="${l.kind}"><span class="mono muted">${l.t} h</span> ${l.text}</div>`).join('')}</div></section></section>`;
-  $('#side').innerHTML = statusPanel(r) + cap(hint('deploy', { state: r }));
+function announceNewLog() {
+  const r = S.run, fresh = r.log.length - ui.logLen; ui.logLen = r.log.length;
+  r.log.slice(0, Math.min(3, fresh)).reverse().forEach((l) => toast(l.text, l.kind, l.kind === 'bad' ? 6000 : 3800));
+  if (r.log.slice(0, fresh).some((l) => l.kind === 'good')) sfx.good();
+  else if (r.log.slice(0, fresh).some((l) => l.kind === 'bad')) sfx.bad();
+}
 
-  const canvas = $('#map');
-  const redraw = () => draw(canvas, { view: S.view, mode: 'deploy', t: r.t, siteK: r.siteK, run: r, plan: S.plan, hover: S.hover });
-  setupCanvas(canvas, redraw); redraw();
-  canvas.onmousemove = (e) => { const h = cellFromEvent(canvas, e); if (h !== S.hover) { S.hover = h; redraw(); } };
-  canvas.onclick = (e) => {
-    if (S.event || S.eventMsg || r.ended) return;
-    const h = cellFromEvent(canvas, e); if (!h) return;
-    S.plan = h.k === r.k ? null : E.planDrive(r, h);
-    if (!S.plan && h.k !== r.k) {
-      $('#side').innerHTML = statusPanel(r) + cap([`No route there. Your ${r.rover.mob.name.toLowerCase()} can't handle slopes ${SLOPE_TEXT[Math.min(3, r.rover.mob.maxSlope + 1)]}${r.rover.extra.tether ? '' : ' without a tether'}.`]);
-      redraw(); return;
+async function act(kind, arg) {
+  const r = S.run;
+  if (ui.busy || r.ended || S.event || S.eventMsg) return;
+  ui.busy = true; updateHud();
+  let ev = null;
+  const t0 = r.t;
+  if (kind === 'drive') {
+    const plan = arg || S.plan; if (!plan) { ui.busy = false; return; }
+    ev = E.drive(r, plan); sfx.drive();
+    const track = r.track.slice();
+    S.plan = null; ui.hoverPlan = null;
+    if (ui.scene && !ui.flat) {
+      overlay();
+      await ui.scene.driveAlong(track.map((p) => cells[p.k]), (n) => { const p = track[n]; updateHud({ t: p.t, b: p.b }); });
     }
-    renderDeploy();
-  };
+  } else if (kind === 'dig') {
+    ev = E.dig(r, arg); sfx.dig();
+    if (ui.scene) { ui.scene.dig(1.8); await sleep(1400); }
+  } else if (kind === 'scan') {
+    ev = E.scan(r); sfx.scan();
+    if (ui.scene) { ui.scene.scanPulse(); await sleep(700); }
+  } else if (kind === 'rest') {
+    ev = E.rest(r, arg);
+    if (ui.scene) await timelapse(t0, r.t);
+  }
+  ui.busy = false;
+  overlay(); updateHud(); announceNewLog();
+  if (ev) { S.event = ev; sfx.alarm(); showEvent(); return; }
+  if (r.ended) finishRun();
+}
+
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+async function timelapse(t0, t1) {
+  const steps = 20;
+  for (let k = 1; k <= steps; k++) { ui.scene.setSunTime(t0 + ((t1 - t0) * k) / steps); await sleep(35); }
+}
+
+function onHover(k, ev) {
+  const tip = $('#tip');
+  if (k == null || ui.busy) { tip.hidden = true; if (ui.hoverK != null) { ui.hoverK = null; ui.hoverPlan = null; overlay(); } return; }
+  const r = S.run, c = cells[k];
+  if (k !== ui.hoverK) {
+    ui.hoverK = k;
+    ui.hoverPlan = k === r.k ? null : E.planDrive(r, c);
+    if (ui.hoverPlan) ui.hoverPlan.tooFar = ui.hoverPlan.wh > r.batteryWh;
+    overlay();
+  }
+  const p = ui.hoverPlan;
+  tip.innerHTML = `<b>${KIND[c.kind]}</b><br>Slope ${SLOPE_TEXT[c.slope]} · Sun ${Math.round(sunAt(c, r.t) * 100)}%
+    ${r.scanned.has(k) ? `<br>Ice: <b>${c.ice.toFixed(1)}%</b>` : c.kind !== 'plain' ? '<br>Ice: unknown, scan to find out' : ''}
+    <br>${k === r.k ? 'Rover is here' : p ? `${p.hours.toFixed(1)} h · ${(p.wh / 1000).toFixed(2)} kWh ${p.tooFar ? '<span class="neg">too far for the battery</span>' : ''}` : '<span class="neg">No safe route</span>'}`;
+  const vp = $('#vp').getBoundingClientRect();
+  tip.style.left = `${Math.min(vp.width - 240, ev.clientX - vp.left + 16)}px`;
+  tip.style.top = `${Math.max(8, ev.clientY - vp.top - 10)}px`;
+  tip.hidden = false;
+}
+
+function onPick(k) {
+  if (k == null || ui.busy || S.event || S.eventMsg) return;
+  const r = S.run;
+  if (k === r.k) { S.plan = null; }
+  else {
+    const p = E.planDrive(r, cells[k]);
+    if (!p) { toast(`No route there. Your ${r.rover.mob.name.toLowerCase()} can't climb that${r.rover.extra.tether ? '' : ' without a tether'}.`, 'bad'); sfx.bad(); return; }
+    // second click on the same target drives
+    if (S.plan && S.plan.path[S.plan.path.length - 1].k === k) { act('drive'); return; }
+    S.plan = p; sfx.select();
+  }
+  overlay(); updateHud();
+}
+
+function keys(e) {
+  const el = e.target instanceof Element ? e.target : null;
+  if (S.stage !== 'deploy' || el?.closest('input,textarea,select,summary')) return;
+  if ((e.key === ' ' || e.key === 'Enter') && el?.closest('button')) return; // let the focused button handle it
+  const r = S.run, c = cells[r.k];
+  const dir = { w: [0, -1], arrowup: [0, -1], s: [0, 1], arrowdown: [0, 1], a: [-1, 0], arrowleft: [-1, 0], d: [1, 0], arrowright: [1, 0] }[e.key.toLowerCase()];
+  if (dir) {
+    e.preventDefault();
+    const n = cellAt(c.i + dir[0], c.j + dir[1]);
+    const p = n && E.planDrive(r, n);
+    if (p) act('drive', p); else { toast('Too steep that way.', 'bad', 1800); sfx.bad(); }
+    return;
+  }
+  if (e.key === ' ') { e.preventDefault(); act('dig', 2); }
+  else if (e.key.toLowerCase() === 'f') act('scan');
+  else if (e.key.toLowerCase() === 'r') act('rest', 4);
+  else if (e.key === 'Enter' && S.plan && !S.event) act('drive');
+  else if (e.key === 'Escape') { S.plan = null; overlay(); updateHud(); }
+}
+
+export async function renderDeploy(capcomPanel) {
+  if (ui) return; // already mounted: the screen updates itself
+  ui = { busy: false, hoverK: null, hoverPlan: null, logLen: S.run.log.length, capcom: capcomPanel, flat: false };
+  $('#main').innerHTML = `<section class="stack">
+    <div class="viewport" id="vp">
+      <div id="v3d" class="v3d"></div>
+      <canvas id="flat" class="flat" hidden aria-label="2D rover map"></canvas>
+      <div class="hud tl" id="hud"></div>
+      <div class="hud tr row">
+        <button id="v-3d" class="primary" title="3D view">3D</button><button id="v-2d" title="Flat NASA map">2D map</button>
+        <button id="v-chase" title="Follow the rover">Follow</button><button id="v-over" title="See the whole area">Overview</button>
+        <button id="v-mute" aria-pressed="${isMuted()}">${isMuted() ? 'Sound off' : 'Sound on'}</button>
+      </div>
+      <div class="tip" id="tip" hidden></div>
+      <div id="banner"></div>
+      <div id="ev"></div>
+    </div>
+    <div class="actionbar">
+      <p class="small" id="plan"></p>
+      <div class="row">
+        <button class="primary" id="a-drive">Drive <span class="kbd">Enter</span></button>
+        <button id="a-dig2"></button><button id="a-dig6">Dig 6 h</button>
+        <button id="a-scan" title="${S.run.rover.sci.scan ? 'Reveal buried ice nearby (1 h)' : 'Needs the neutron spectrometer'}">Scan <span class="kbd">F</span></button>
+        <button id="a-rest">Rest 4 h <span class="kbd">R</span></button>
+        <button id="a-end">End mission</button>
+        <span class="row small muted" style="margin-left:auto">${['terrain', 'slope', 'sun'].map((v) => `<button data-view="${v}" class="${S.view === v ? 'on' : ''}">${{ terrain: 'Terrain', slope: 'NASA slope', sun: 'Sunlight' }[v]}</button>`).join('')}</span>
+      </div>
+    </div>
+    ${legend()}
+    <details class="panel"><summary><b>Mission log</b></summary><div class="log" id="log"></div></details>
+  </section>`;
+
+  ui.map = document.createElement('canvas');
+  setupCanvas(ui.map, () => overlay());
+  const flat = $('#flat'); setupCanvas(flat, () => {});
+  ui.keyHandler = keys; window.addEventListener('keydown', keys);
+
+  try {
+    const { MoonScene } = await import('./scene3d.js');
+    ui.scene = new MoonScene($('#v3d'), ui.map);
+    ui.scene.onHover = onHover; ui.scene.onPick = onPick;
+    ui.scene.setLander(S.run.siteK);
+  } catch (err) {
+    console.warn('3D view unavailable, using the 2D map', err);
+    ui.scene = null; setFlat(true); $('#v-3d').disabled = true;
+  }
+  overlay(); updateHud(); showEvent();
+
   $('#main').onclick = (e) => {
     const b = e.target.closest('button'); if (!b) return;
-    if (b.dataset.view) { S.view = b.dataset.view; renderDeploy(); return; }
+    if (b.dataset.view) { S.view = b.dataset.view; document.querySelectorAll('[data-view]').forEach((x) => x.classList.toggle('on', x === b)); overlay(); drawFlat(); return; }
     if (b.dataset.choice) {
       const ev = S.event; S.event = null;
-      const text = E.resolveEvent(r, ev, b.dataset.choice === 'auto' ? -1 : Number(b.dataset.choice));
-      S.eventMsg = { title: ev.title, text }; renderDeploy(); return;
+      const text = E.resolveEvent(S.run, ev, b.dataset.choice === 'auto' ? -1 : Number(b.dataset.choice));
+      S.eventMsg = { title: ev.title, text }; sfx.click(); showEvent(); overlay(); updateHud(); ui.logLen = S.run.log.length; return;
     }
-    if (b.id === 'ev-ok') { S.eventMsg = null; if (r.ended) finishRun(); else renderDeploy(); return; }
-    if (b.id === 'drive' && S.plan) after(E.drive(r, S.plan));
-    if (b.id === 'dig2') after(E.dig(r, 2));
-    if (b.id === 'dig6') after(E.dig(r, 6));
-    if (b.id === 'scan') after(E.scan(r));
-    if (b.id === 'rest') after(E.rest(r, 4));
-    if (b.id === 'end') { E.finish(r); finishRun(); }
+    if (b.id === 'ev-ok') { S.eventMsg = null; showEvent(); if (S.run.ended) finishRun(); return; }
+    const id = b.id;
+    if (id === 'a-drive') act('drive');
+    else if (id === 'a-dig2') act('dig', 2);
+    else if (id === 'a-dig6') act('dig', 6);
+    else if (id === 'a-scan') act('scan');
+    else if (id === 'a-rest') act('rest', 4);
+    else if (id === 'a-end') { E.finish(S.run); finishRun(); }
+    else if (id === 'v-2d') setFlat(true);
+    else if (id === 'v-3d' && ui.scene) setFlat(false);
+    else if (id === 'v-chase' && ui.scene) ui.scene.chase();
+    else if (id === 'v-over' && ui.scene) ui.scene.overview();
+    else if (id === 'v-mute') { setMuted(!isMuted()); b.textContent = isMuted() ? 'Sound off' : 'Sound on'; b.setAttribute('aria-pressed', isMuted()); }
   };
+
+  flat.onmousemove = (e) => { const c = cellFromEvent(flat, e); onHover(c ? c.k : null, e); drawFlat(); };
+  flat.onmouseleave = () => onHover(null);
+  flat.onclick = (e) => { const c = cellFromEvent(flat, e); onPick(c ? c.k : null); drawFlat(); };
+
+  if (!S.landed) await landing();
+  else if (ui.scene) ui.scene.setRover(S.run.design, S.run.k);
 }
 
-const REAL = [
-  ['NASA VIPER', 'Planned 2023-24 south pole ice rover: 4 wheels that could "walk", neutron spectrometer, drill, solar power, heaters and a lamp for driving into shadow.'],
-  ['NASA RASSOR', 'Prototype digging robot with two counter-rotating bucket drums, so it can dig in low gravity without being pushed away.'],
-  ['Honeybee TRIDENT', 'A 1 m rotary-percussive drill built to reach ice-rich soil on the Moon.'],
-  ['LCROSS (2009)', 'Crashed a rocket stage into Cabeus crater near the south pole and measured about 5.6% water in the plume.'],
-];
+function drawFlat() {
+  if (!ui || !ui.flat) return;
+  const r = S.run;
+  draw($('#flat'), { view: S.view, mode: 'deploy', t: r.t, siteK: r.siteK, run: r, plan: S.plan, hoverPlan: ui.hoverPlan, hover: ui.hoverK != null ? cells[ui.hoverK] : null });
+}
 
-export function renderDebrief(capcomPanel) {
-  const d = S.result, r = S.run;
-  const lessons = [];
-  if (r.endReason === 'froze') lessons.push('Shadows near the pole drop to about -200 °C. Heaters or an RTG keep electronics alive.');
-  if (r.endReason === 'battery') lessons.push('Batteries drain fast in the dark. Plan trips into shadow like dives: go in, work, come back up for sunlight.');
-  if (r.stats.brownouts) lessons.push(`The battery ran flat ${r.stats.brownouts} time(s). Bigger batteries or shorter drives would have saved hours.`);
-  if (r.rover.sci.id === 'none' && r.objective.id !== 'base') lessons.push('Without an ice detector you dug blind. VIPER carried a neutron spectrometer for exactly this reason.');
-  if (r.decisions.total > r.decisions.withLink) lessons.push('Some surprises hit while there was no link to Earth. Comms are part of survival, not an extra.');
-  if (d.progress >= 1) lessons.push('You met the objective. Could you do it with less mass or money? Real missions are judged on margins too.');
-  $('#main').innerHTML = `<section class="panel stack"><span class="tag ${d.grade === 'Mission success' ? 'good' : d.grade === 'Partial success' ? 'warn' : 'bad'}">${d.grade}</span>
-    <div class="row" style="align-items:baseline"><div class="score">${d.score}</div><div class="muted">/ 100 points</div></div>
-    <div>${d.items.map((i) => `<div class="check"><span class="tag ${i.pts >= i.max * 0.8 ? 'good' : i.pts >= i.max * 0.4 ? 'warn' : 'bad'}">${i.pts}/${i.max}</span>
-      <div><b>${i.label}</b><div class="small muted">${i.why}</div></div></div>`).join('')}</div>
-    <h2>Why it went this way</h2><ul>${lessons.map((l) => `<li>${l}</li>`).join('')}</ul>
-    <h2>Real missions like yours</h2>${REAL.map(([n, t]) => `<p class="small"><b>${n}:</b> ${t}</p>`).join('')}
-    <div class="row"><button class="primary" id="again">Fly the same rover again</button><button id="redesign">Change the design</button><a href="../../index.html"><button>Back to mission control</button></a></div></section>`;
-  $('#side').innerHTML = statusPanel(r) + capcomPanel(['Your score is saved to mission control. Try a harder objective, or the same one with a cheaper rover.']);
-  $('#main').onclick = (e) => {
-    const b = e.target.closest('button'); if (!b) return;
-    if (b.id === 'again') { startDeploy(); go('deploy'); }
-    if (b.id === 'redesign') go('build');
-  };
+function setFlat(on) {
+  ui.flat = on;
+  $('#flat').hidden = !on; $('#v3d').hidden = on;
+  $('#v-2d').classList.toggle('primary', on); $('#v-3d').classList.toggle('primary', !on);
+  overlay(); drawFlat();
+}
+
+async function landing() {
+  S.landed = true;
+  if (!ui.scene) { toast('Touchdown on the Shackleton rim.', 'good'); return; }
+  ui.busy = true; updateHud();
+  const banner = $('#banner');
+  banner.innerHTML = '<div class="banner"><span class="tag accent">Powered descent</span><h2 id="bn-text">Altitude 2,000 m</h2><button id="skip" class="small">Skip</button></div>';
+  sfx.thrust();
+  let skip = false; $('#skip').onclick = () => { skip = true; ui.scene.endLanding(); };
+  const done = ui.scene.playLanding(S.run.siteK);
+  const lines = ['Altitude 2,000 m', 'Altitude 600 m · hazard scan', 'Altitude 100 m · dust rising', 'Contact light'];
+  for (let n = 0; n < lines.length && !skip; n++) { $('#bn-text').textContent = lines[n]; await Promise.race([sleep(900), done]); }
+  await done;
+  sfx.touchdown();
+  banner.innerHTML = '<div class="banner"><span class="tag good">Touchdown</span><h2>The rover is rolling off the lander</h2></div>';
+  ui.scene.setRover(S.run.design, S.run.siteK);
+  setTimeout(() => { if (ui) banner.innerHTML = ''; }, 2200);
+  ui.busy = false; updateHud();
+  toast('Tip: hover the ground to see the route and its cost. Click twice to drive.', 'info', 7000);
 }
